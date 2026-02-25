@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentpay"
+version = "0.1.0b0"
+description = "AgentPay SDK — payment requests with budget enforcement and human approval"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["requests>=2.28"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

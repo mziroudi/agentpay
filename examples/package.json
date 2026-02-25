@@ -1,0 +1,12 @@
+{
+  "name": "agentpay-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "demo": "node run-demo.js",
+    "demo:api": "node run-demo-api-only.js"
+  },
+  "dependencies": {
+    "@agentpay/sdk": "file:../sdk-ts"
+  }
+}

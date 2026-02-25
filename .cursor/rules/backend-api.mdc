@@ -1,0 +1,31 @@
+---
+description: Backend API, Fastify, and AgentPay endpoints
+globs: backend/**/*.ts
+alwaysApply: false
+---
+
+# Backend & API Conventions
+
+## API Surface (eight endpoints only)
+
+- `POST /v1/payment-request` — Core: validate body, auth, budget check, return approved/pending/declined.
+- `GET /v1/transactions/:id` — Poll status for pending transactions.
+- `POST /v1/approve/:token` — One-click approve (single-use JWT); enqueue Stripe charge.
+- `POST /v1/decline/:token` — One-click decline; update status, log.
+- `POST /v1/stripe/webhook` — Handle `payment_intent.succeeded` / `payment_intent.payment_failed`; finalize transaction status (do not rely on API response alone).
+- `GET /v1/dashboard/transactions` — Paginated list, filters (agent, status, date).
+- `GET /v1/dashboard/agents`, `POST /v1/dashboard/agents` — List/create agents; return API key in plaintext only on create.
+- `PUT /v1/dashboard/agents/:id/limits` — Update budget limits.
+
+## Fastify
+
+- Use Fastify schema validation on all request bodies; type request/reply from schemas.
+- Auth middleware: extract `Authorization: Bearer <key>`, hash with SHA-256, lookup agent by `api_key_hash` and `is_active`; attach `agent_id` and `organization_id` to request.
+
+## Idempotency
+
+- Require `idempotency_key` on payment requests; UNIQUE in `transactions`. On duplicate key, return existing transaction and do not re-run logic.
+
+## Stripe flow
+
+- Worker creates Payment Intent and sets transaction to `processing`. **Final status** (`completed` / `declined`) is set only in the Stripe webhook handler from `payment_intent.succeeded` and `payment_intent.payment_failed`.

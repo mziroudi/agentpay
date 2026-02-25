@@ -1,0 +1,12 @@
+# Railway uses Nixpacks by default; ensure Node 20 and correct start
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm start"

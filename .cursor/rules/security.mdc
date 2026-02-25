@@ -1,0 +1,30 @@
+---
+description: Security: webhooks, JWTs, rate limit, auth
+globs: backend/**/*.ts
+alwaysApply: false
+---
+
+# Security Rules
+
+## Stripe webhook
+
+- Verify `Stripe-Signature` with webhook signing secret before processing.
+- Finalize `transactions.status` only in webhook from `payment_intent.succeeded` / `payment_intent.payment_failed`. Worker must not set final status.
+
+## Approval JWTs (single-use, short-lived)
+
+- Payload: `transaction_id`, `organization_id`, `action`, `jti`, `exp` (1h recommended).
+- On creation: store `approval_token:{jti}` in Redis as `unused` with TTL = token lifetime.
+- On `/v1/approve/:token` and `/v1/decline/:token`: verify JWT, then atomically check Redis; if not `unused` return 400/409 and do nothing. If `unused`, mark used then proceed. Log replay attempts.
+
+## Rate limiting
+
+- Redis key e.g. `agent:{id}:rate` with INCR and 60s TTL. If count &gt; limit (e.g. 20), return **429 Too Many Requests**. Do not build auto-block or admin email for rate limits in MVP.
+
+## API keys
+
+- Store only SHA-256 hash in `agents.api_key_hash`. Never log or store plaintext. Show plaintext only once on agent creation.
+
+## Audit log
+
+- `audit_logs` is append-only; never update or delete. Do not put secrets in `details` (no API keys, no full card data).

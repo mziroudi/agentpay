@@ -1,0 +1,33 @@
+---
+description: AgentPay project overview, stack, and MVP scope
+alwaysApply: true
+---
+
+# AgentPay Project
+
+AgentPay is middleware between AI agents and Stripe: budget checks, human approval for large amounts, and a full audit trail.
+
+## Tech Stack (do not substitute)
+
+- **Backend**: Node.js 20 + Fastify (Railway)
+- **DB**: Neon Postgres (5 tables only)
+- **Cache/queue**: Upstash Redis + BullMQ
+- **Payments**: Stripe; **Email**: Resend
+- **Dashboard**: Next.js on Vercel
+- **Errors**: Sentry
+
+No Supabase, AWS, Docker Compose, or Kubernetes for MVP.
+
+## Three Core Jobs
+
+1. **Budget enforcement** — Check daily + per-tx limits in Redis; target &lt; 30ms.
+2. **Human approval** — Over threshold → save as `pending`, email admin with Approve/Decline links.
+3. **Audit trail** — Every decision in `transactions` + append-only `audit_logs`.
+
+## Data Model (five tables only)
+
+`organizations` → `agents` (api_key_hash only, never plaintext) → `budget_limits`, `transactions`, `audit_logs`. Do not add tables unless genuinely missing.
+
+## What NOT to build in MVP
+
+No Slack, webhooks, merchant whitelist, multi-currency, RBAC, SOC 2, mobile app, analytics beyond transaction list, or custom infra (Docker/K8s/AWS).

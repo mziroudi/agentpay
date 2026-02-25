@@ -1,0 +1,21 @@
+---
+description: Dashboard auth and Next.js conventions
+globs: dashboard/**/*
+alwaysApply: false
+---
+
+# Dashboard & Auth
+
+## No passwords
+
+- Do not build a password system. Use either:
+  - **Magic link**: user enters email → backend sends link with short-lived JWT → `/magic?token=...` validates, marks token used in Redis, sets HTTP-only session cookie.
+  - **Google OAuth**: NextAuth.js with Google provider; map to organization.
+
+## Session
+
+- Secure, HTTP-only, SameSite cookies. Resolve `organization_id` from session for all dashboard API calls. Dashboard calls `/v1/dashboard/*` with session cookie (or Bearer session token), not agent API keys.
+
+## Next.js (Vercel)
+
+- Use app router. Pages: transaction list (filters), agents list (today spend vs limit), agent detail with budget limits form. Call backend via typed client in `lib/api.ts`. No server-side secrets in client bundles.

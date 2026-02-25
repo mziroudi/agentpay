@@ -1,0 +1,1 @@
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS admin_email VARCHAR(255);

@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Env and secrets
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+.next/
+out/
+
+# Logs and debug
+*.log
+npm-debug.log*
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.eggs/
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Optional
+*.local
