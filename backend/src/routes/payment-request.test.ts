@@ -6,8 +6,8 @@ import { query } from '../db/client.js';
 
 vi.mock('../db/client.js', () => ({ query: vi.fn() }));
 vi.mock('../services/budget.js', () => ({
-  checkBudget: vi.fn().mockResolvedValue({ ok: true, underThreshold: true }),
-  addDailySpend: vi.fn().mockResolvedValue(1000),
+  checkBudget: vi.fn().mockResolvedValue({ ok: true, underThreshold: true, dailyLimitCents: 100_000 }),
+  reserveDailySpend: vi.fn().mockResolvedValue({ ok: true, newTotal: 1000 }),
 }));
 vi.mock('../services/audit.js', () => ({
   appendAudit: vi.fn().mockResolvedValue(undefined),

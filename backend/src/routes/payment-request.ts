@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { query } from '../db/client.js';
 import { apiKeyAuth } from '../middleware/auth.js';
 import { rateLimitByAgent } from '../middleware/rateLimit.js';
-import { checkBudget, addDailySpend } from '../services/budget.js';
+import { checkBudget, reserveDailySpend } from '../services/budget.js';
 import { appendAudit } from '../services/audit.js';
 import { stripeChargeQueue, approvalEmailQueue } from '../queue/index.js';
 
@@ -73,9 +73,23 @@ export default async function paymentRequestRoutes(app: FastifyInstance) {
         });
       }
 
-      const txId = uuidv4();
       const status = budgetResult.underThreshold ? 'approved' : 'pending';
+      if (status === 'approved') {
+        const reserve = await reserveDailySpend(agent.agentId, amount_cents, budgetResult.dailyLimitCents);
+        if (!reserve.ok) {
+          await appendAudit({
+            agentId: agent.agentId,
+            action: 'budget.exceeded',
+            details: { amount_cents, reason: 'daily_exceeded' },
+          });
+          return reply.status(402).send({
+            error: 'Budget exceeded',
+            reason: 'daily_exceeded',
+          });
+        }
+      }
 
+      const txId = uuidv4();
       await query(
         `INSERT INTO transactions (id, agent_id, organization_id, amount_cents, currency, status, purpose, context, idempotency_key)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
@@ -93,7 +107,6 @@ export default async function paymentRequestRoutes(app: FastifyInstance) {
       );
 
       if (status === 'approved') {
-        await addDailySpend(agent.agentId, amount_cents);
         await appendAudit({
           agentId: agent.agentId,
           transactionId: txId,

@@ -73,8 +73,37 @@ export async function getDailySpend(agentId: string): Promise<number> {
   return total;
 }
 
+/** Atomically reserve daily spend. If reservation would exceed dailyLimitCents, rolls back and returns ok: false. */
+export async function reserveDailySpend(
+  agentId: string,
+  amountCents: number,
+  dailyLimitCents: number
+): Promise<{ ok: true; newTotal: number } | { ok: false }> {
+  const key = todayKey(agentId);
+  const script = `
+    local k = KEYS[1]
+    local amount = tonumber(ARGV[1])
+    local limit = tonumber(ARGV[2])
+    local ttl = tonumber(ARGV[3])
+    local newTotal = redis.call('INCRBY', k, amount)
+    if newTotal > limit then
+      redis.call('DECRBY', k, amount)
+      return {0, 0}
+    end
+    redis.call('EXPIRE', k, ttl)
+    return {1, newTotal}
+  `;
+  const ttl = ttlToMidnight();
+  const result = await redisCommand(async (r) => {
+    const out = await r.eval(script, 1, key, amountCents, dailyLimitCents, ttl);
+    return out as [number, number];
+  });
+  if (result[0] === 0) return { ok: false };
+  return { ok: true, newTotal: result[1] };
+}
+
 export type BudgetCheckResult =
-  | { ok: true; underThreshold: boolean }
+  | { ok: true; underThreshold: boolean; dailyLimitCents: number }
   | { ok: false; reason: 'no_limits' | 'daily_exceeded' | 'per_tx_exceeded' };
 
 export async function checkBudget(agentId: string, amountCents: number): Promise<BudgetCheckResult> {
@@ -86,5 +115,5 @@ export async function checkBudget(agentId: string, amountCents: number): Promise
   if (dailySpend + amountCents > limits.dailyLimitCents) return { ok: false, reason: 'daily_exceeded' };
 
   const underThreshold = amountCents <= limits.approvalThresholdCents;
-  return { ok: true, underThreshold };
+  return { ok: true, underThreshold, dailyLimitCents: limits.dailyLimitCents };
 }

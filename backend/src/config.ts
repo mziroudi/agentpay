@@ -10,21 +10,29 @@ function optional(key: string, fallback: string): string {
   return process.env[key] ?? fallback;
 }
 
+const nodeEnv = optional('NODE_ENV', 'development');
+
 export const config = {
   port: parseInt(optional('PORT', '3000'), 10),
-  nodeEnv: optional('NODE_ENV', 'development'),
+  nodeEnv,
 
   database: {
-    url: optional('DATABASE_URL', ''),
+    url:
+      nodeEnv === 'test'
+        ? optional('DATABASE_URL', '')
+        : required('DATABASE_URL'),
   },
 
   redis: {
-    url: optional('REDIS_URL', ''),
+    url:
+      nodeEnv === 'test'
+        ? optional('REDIS_URL', '')
+        : required('REDIS_URL'),
   },
 
   sentry: {
     dsn: process.env.SENTRY_DSN ?? '',
-    environment: optional('NODE_ENV', 'development'),
+    environment: nodeEnv,
   },
 
   stripe: {
@@ -39,6 +47,10 @@ export const config = {
 
   app: {
     baseUrl: optional('APP_BASE_URL', 'http://localhost:3000'),
-    jwtSecret: optional('JWT_SECRET', 'dev-secret-change-in-production-min-32-chars'),
+    // In non-test environments, JWT_SECRET must be explicitly set.
+    jwtSecret:
+      nodeEnv === 'test'
+        ? optional('JWT_SECRET', 'test-secret-not-for-production')
+        : required('JWT_SECRET'),
   },
 } as const;

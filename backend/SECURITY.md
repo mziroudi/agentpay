@@ -22,3 +22,10 @@
 ## Audit log
 
 - `audit_logs` is append-only. No secrets in `details`.
+
+## P0 hardening
+
+- **Daily budget race**: Daily spend is reserved atomically (Redis Lua: INCRBY then rollback if over limit). Reservation happens only for the auto-approve path before inserting the transaction; no separate add-after-insert.
+- **Idempotency**: Per-agent: `UNIQUE(agent_id, idempotency_key)` so the same key can be used by different agents.
+- **Redis**: Required in non-test; startup pings Redis and exits if unavailable. Dashboard magic-link single-use and rate limiting use Redis and throw if unavailable (no silent skip).
+- **Dashboard session**: Magic link redirects to dashboard `/auth/callback?code=...` (one-time code in Redis). Dashboard server exchanges code for session and sets **HttpOnly, SameSite=Lax** (and Secure in production) cookie. No session token in URL hash or frontend JS.

@@ -3,6 +3,7 @@ import * as Sentry from '@sentry/node';
 import Fastify, { type FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import { config } from './config.js';
+import { redisCommand } from './redis/client.js';
 import paymentRequestRoutes from './routes/payment-request.js';
 import stripeWebhookRoutes from './routes/stripe-webhook.js';
 import approveDeclineRoutes from './routes/approve-decline.js';
@@ -75,6 +76,10 @@ if (approvalEmailWorker) {
 
 const start = async () => {
   try {
+    if (config.nodeEnv !== 'test') {
+      await redisCommand((r) => r.ping());
+      app.log.info('Redis connected');
+    }
     await app.listen({ port: config.port, host: '0.0.0.0' });
   } catch (err) {
     app.log.error(err);

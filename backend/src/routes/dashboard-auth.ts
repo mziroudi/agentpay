@@ -1,9 +1,8 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import type { FastifyReply as FReply } from 'fastify';
 import jwt from 'jsonwebtoken';
 import { Resend } from 'resend';
 import { query } from '../db/client.js';
-import { redisCommand, getRedis } from '../redis/client.js';
+import { redisCommand } from '../redis/client.js';
 import { config } from '../config.js';
 
 const LOGIN_TOKEN_PREFIX = 'login_token:';
@@ -38,10 +37,7 @@ export default async function dashboardAuthRoutes(app: FastifyInstance) {
         { expiresIn: LOGIN_TOKEN_TTL }
       );
 
-      const redis = getRedis();
-      if (redis) {
-        await redis.setex(LOGIN_TOKEN_PREFIX + jti, LOGIN_TOKEN_TTL, 'unused');
-      }
+      await redisCommand((r) => r.setex(LOGIN_TOKEN_PREFIX + jti, LOGIN_TOKEN_TTL, 'unused'));
 
       if (config.resend.apiKey) {
         const baseUrl = config.app.baseUrl.replace(/\/$/, '');
@@ -74,15 +70,12 @@ export default async function dashboardAuthRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Invalid or expired token' });
       }
 
-      const redis = getRedis();
-      if (redis) {
-        const key = LOGIN_TOKEN_PREFIX + payload.jti;
-        const val = await redis.get(key);
-        if (val !== 'unused') {
-          return reply.status(400).send({ error: 'Link already used or expired' });
-        }
-        await redis.setex(key, 60, 'used');
+      const key = LOGIN_TOKEN_PREFIX + payload.jti;
+      const val = await redisCommand((r) => r.get(key));
+      if (val !== 'unused') {
+        return reply.status(400).send({ error: 'Link already used or expired' });
       }
+      await redisCommand((r) => r.setex(key, 60, 'used'));
 
       const sessionToken = jwt.sign(
         { org_id: payload.org_id, email: payload.email },
@@ -90,11 +83,25 @@ export default async function dashboardAuthRoutes(app: FastifyInstance) {
         { expiresIn: SESSION_TTL_SEC }
       );
 
-      const redirectUrl = process.env.DASHBOARD_ORIGIN || 'http://localhost:3001';
-      const withToken = `${redirectUrl}/dashboard#token=${encodeURIComponent(sessionToken)}`;
-      reply
-        .header('Set-Cookie', `agentpay_session=${sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SEC}${config.nodeEnv === 'production' ? '; Secure' : ''}`)
-        .redirect(302, withToken);
+      const dashboardOrigin = process.env.DASHBOARD_ORIGIN || 'http://localhost:3001';
+      const code = crypto.randomUUID();
+      const CODE_TTL = 60;
+      await redisCommand((r) => r.setex(`login_code:${code}`, CODE_TTL, sessionToken));
+
+      reply.redirect(302, `${dashboardOrigin}/auth/callback?code=${encodeURIComponent(code)}`);
+    }
+  );
+
+  app.get<{ Querystring: { code: string } }>(
+    '/v1/dashboard/exchange-code',
+    async (request: FastifyRequest<{ Querystring: { code: string } }>, reply: FastifyReply) => {
+      const code = request.query?.code;
+      if (!code) return reply.status(400).send({ error: 'code required' });
+      const key = `login_code:${code}`;
+      const sessionToken = await redisCommand((r) => r.get(key));
+      if (!sessionToken) return reply.status(400).send({ error: 'Invalid or expired code' });
+      await redisCommand((r) => r.del(key));
+      return reply.send({ sessionToken });
     }
   );
 }
