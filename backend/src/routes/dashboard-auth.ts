@@ -83,7 +83,7 @@ export default async function dashboardAuthRoutes(app: FastifyInstance) {
         { expiresIn: SESSION_TTL_SEC }
       );
 
-      const dashboardOrigin = process.env.DASHBOARD_ORIGIN || 'http://localhost:3001';
+      const dashboardOrigin = config.app.dashboardOrigin;
       const code = crypto.randomUUID();
       const CODE_TTL = 60;
       await redisCommand((r) => r.setex(`login_code:${code}`, CODE_TTL, sessionToken));

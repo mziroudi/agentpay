@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { query } from '../db/client.js';
 import { apiKeyAuth } from '../middleware/auth.js';
 import { rateLimitByAgent } from '../middleware/rateLimit.js';
-import { checkBudget, reserveDailySpend } from '../services/budget.js';
+import { checkBudget, reserveDailySpend, releaseDailySpend } from '../services/budget.js';
 import { appendAudit } from '../services/audit.js';
 import { stripeChargeQueue, approvalEmailQueue } from '../queue/index.js';
 
@@ -74,6 +74,7 @@ export default async function paymentRequestRoutes(app: FastifyInstance) {
       }
 
       const status = budgetResult.underThreshold ? 'approved' : 'pending';
+      let reservedDailySpend = false;
       if (status === 'approved') {
         const reserve = await reserveDailySpend(agent.agentId, amount_cents, budgetResult.dailyLimitCents);
         if (!reserve.ok) {
@@ -87,51 +88,59 @@ export default async function paymentRequestRoutes(app: FastifyInstance) {
             reason: 'daily_exceeded',
           });
         }
+        reservedDailySpend = true;
       }
 
       const txId = uuidv4();
-      await query(
-        `INSERT INTO transactions (id, agent_id, organization_id, amount_cents, currency, status, purpose, context, idempotency_key)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [
-          txId,
-          agent.agentId,
-          agent.organizationId,
-          amount_cents,
-          currency,
+      try {
+        await query(
+          `INSERT INTO transactions (id, agent_id, organization_id, amount_cents, currency, status, purpose, context, idempotency_key)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [
+            txId,
+            agent.agentId,
+            agent.organizationId,
+            amount_cents,
+            currency,
+            status,
+            purpose ?? null,
+            context ? JSON.stringify(context) : null,
+            idempotency_key,
+          ]
+        );
+
+        if (status === 'approved') {
+          await appendAudit({
+            agentId: agent.agentId,
+            transactionId: txId,
+            action: 'payment.approved',
+            details: { amount_cents },
+          });
+          if (stripeChargeQueue) {
+            await stripeChargeQueue.add('charge', { transactionId: txId });
+          }
+        } else {
+          await appendAudit({
+            agentId: agent.agentId,
+            transactionId: txId,
+            action: 'payment.pending',
+            details: { amount_cents },
+          });
+          if (approvalEmailQueue) {
+            await approvalEmailQueue.add('send', { transactionId: txId });
+          }
+        }
+
+        return reply.send({
           status,
-          purpose ?? null,
-          context ? JSON.stringify(context) : null,
-          idempotency_key,
-        ]
-      );
-
-      if (status === 'approved') {
-        await appendAudit({
-          agentId: agent.agentId,
-          transactionId: txId,
-          action: 'payment.approved',
-          details: { amount_cents },
+          transaction_id: txId,
         });
-        if (stripeChargeQueue) {
-          await stripeChargeQueue.add('charge', { transactionId: txId });
+      } catch (error) {
+        if (reservedDailySpend) {
+          await releaseDailySpend(agent.agentId, amount_cents).catch(() => undefined);
         }
-      } else {
-        await appendAudit({
-          agentId: agent.agentId,
-          transactionId: txId,
-          action: 'payment.pending',
-          details: { amount_cents },
-        });
-        if (approvalEmailQueue) {
-          await approvalEmailQueue.add('send', { transactionId: txId });
-        }
+        throw error;
       }
-
-      return reply.send({
-        status,
-        transaction_id: txId,
-      });
     }
   );
 }
