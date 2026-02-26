@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { query } from '../db/client.js';
 import { verifyApprovalToken, consumeApprovalToken } from '../services/approvalToken.js';
 import { appendAudit } from '../services/audit.js';
+import { getBudgetLimits, reserveDailySpend, releaseDailySpend } from '../services/budget.js';
 import { stripeChargeQueue } from '../queue/index.js';
 
 interface Params { token: string }
@@ -33,8 +34,8 @@ export default async function approveDeclineRoutes(app: FastifyInstance) {
         return reply.status(409).send({ error: 'Link already used' });
       }
 
-      const txResult = await query<{ id: string; agent_id: string; status: string }>(
-        `SELECT id, agent_id, status FROM transactions WHERE id = $1`,
+      const txResult = await query<{ id: string; agent_id: string; status: string; amount_cents: number }>(
+        `SELECT id, agent_id, status, amount_cents FROM transactions WHERE id = $1`,
         [payload.transactionId]
       );
       if (txResult.rows.length === 0) {
@@ -45,22 +46,43 @@ export default async function approveDeclineRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Transaction no longer pending' });
       }
 
-      await query(
-        `UPDATE transactions SET status = 'approved' WHERE id = $1`,
-        [payload.transactionId]
-      );
-      await appendAudit({
-        agentId: tx.agent_id,
-        transactionId: payload.transactionId,
-        action: 'payment.approved',
-        details: { source: 'approval_link' },
-      });
-
-      if (stripeChargeQueue) {
-        await stripeChargeQueue.add('charge', { transactionId: payload.transactionId });
+      const limits = await getBudgetLimits(tx.agent_id);
+      if (!limits) {
+        return reply.status(400).send({ error: 'No budget limits configured for agent' });
+      }
+      const reserved = await reserveDailySpend(tx.agent_id, tx.amount_cents, limits.dailyLimitCents);
+      if (!reserved.ok) {
+        await appendAudit({
+          agentId: tx.agent_id,
+          transactionId: payload.transactionId,
+          action: 'budget.exceeded',
+          details: { amount_cents: tx.amount_cents, reason: 'daily_exceeded', source: 'approval_link' },
+        });
+        return reply.status(402).send({ error: 'Budget exceeded', reason: 'daily_exceeded' });
       }
 
-      return reply.send({ ok: true, transaction_id: payload.transactionId });
+      try {
+        await query(
+          `UPDATE transactions SET status = 'approved' WHERE id = $1`,
+          [payload.transactionId]
+        );
+        await appendAudit({
+          agentId: tx.agent_id,
+          transactionId: payload.transactionId,
+          action: 'payment.approved',
+          details: { source: 'approval_link' },
+        });
+
+        if (stripeChargeQueue) {
+          await stripeChargeQueue.add('charge', { transactionId: payload.transactionId });
+        }
+
+        return reply.send({ ok: true, transaction_id: payload.transactionId });
+      } catch (error) {
+        // Compensate reservation so failed approval processing does not leak daily spend.
+        await releaseDailySpend(tx.agent_id, tx.amount_cents).catch(() => undefined);
+        throw error;
+      }
     }
   );
 
@@ -90,8 +112,8 @@ export default async function approveDeclineRoutes(app: FastifyInstance) {
         return reply.status(409).send({ error: 'Link already used' });
       }
 
-      const txResult = await query<{ id: string; agent_id: string; status: string }>(
-        `SELECT id, agent_id, status FROM transactions WHERE id = $1`,
+      const txResult = await query<{ id: string; agent_id: string; status: string; amount_cents: number }>(
+        `SELECT id, agent_id, status, amount_cents FROM transactions WHERE id = $1`,
         [payload.transactionId]
       );
       if (txResult.rows.length === 0) {

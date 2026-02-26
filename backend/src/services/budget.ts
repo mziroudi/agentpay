@@ -102,6 +102,20 @@ export async function reserveDailySpend(
   return { ok: true, newTotal: result[1] };
 }
 
+
+export async function releaseDailySpend(agentId: string, amountCents: number): Promise<number> {
+  const key = todayKey(agentId);
+  return redisCommand(async (r) => {
+    const newTotal = await r.decrby(key, amountCents);
+    if (newTotal < 0) {
+      await r.set(key, '0');
+      await r.expire(key, ttlToMidnight());
+      return 0;
+    }
+    return newTotal;
+  });
+}
+
 export type BudgetCheckResult =
   | { ok: true; underThreshold: boolean; dailyLimitCents: number }
   | { ok: false; reason: 'no_limits' | 'daily_exceeded' | 'per_tx_exceeded' };

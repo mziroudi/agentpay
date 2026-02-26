@@ -35,7 +35,14 @@ app.addHook('preParsing', async (request, _reply, payload) => {
   return payload;
 });
 
-await app.register(cors, { origin: true, credentials: true });
+await app.register(cors, {
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    const ok = config.cors.allowedOrigins.includes(origin);
+    cb(ok ? null : new Error('CORS origin not allowed'), ok);
+  },
+  credentials: true,
+});
 
 app.setErrorHandler((err, _request, reply) => {
   if (config.sentry.dsn) {

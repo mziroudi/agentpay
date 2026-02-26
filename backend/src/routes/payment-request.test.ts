@@ -1,13 +1,15 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import paymentRequestRoutes from './payment-request.js';
 import { query } from '../db/client.js';
+import { reserveDailySpend, releaseDailySpend } from '../services/budget.js';
 
 vi.mock('../db/client.js', () => ({ query: vi.fn() }));
 vi.mock('../services/budget.js', () => ({
   checkBudget: vi.fn().mockResolvedValue({ ok: true, underThreshold: true, dailyLimitCents: 100_000 }),
   reserveDailySpend: vi.fn().mockResolvedValue({ ok: true, newTotal: 1000 }),
+  releaseDailySpend: vi.fn().mockResolvedValue(0),
 }));
 vi.mock('../services/audit.js', () => ({
   appendAudit: vi.fn().mockResolvedValue(undefined),
@@ -26,6 +28,10 @@ describe('POST /v1/payment-request', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
   it('returns 401 without Authorization', async () => {
@@ -47,6 +53,28 @@ describe('POST /v1/payment-request', () => {
       payload: { amount_cents: 1000, idempotency_key: 'test-key-2' },
     });
     expect(res.statusCode).toBe(401);
+  });
+
+
+
+  it('releases reserved daily spend if transaction insert fails', async () => {
+    vi.mocked(query)
+      .mockResolvedValueOnce({ rows: [{ id: 'agent-uuid', organization_id: 'org-uuid' }], rowCount: 1 } as never)
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 } as never)
+      .mockRejectedValueOnce(new Error('insert failed') as never);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/payment-request',
+      headers: { authorization: 'Bearer valid-test-key' },
+      payload: {
+        amount_cents: 1000,
+        idempotency_key: 'test-key-4',
+      },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(vi.mocked(releaseDailySpend)).toHaveBeenCalledWith('agent-uuid', 1000);
   });
 
   it('returns approved and writes transaction when under budget', async () => {

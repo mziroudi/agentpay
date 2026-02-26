@@ -11,6 +11,11 @@ function optional(key: string, fallback: string): string {
 }
 
 const nodeEnv = optional('NODE_ENV', 'development');
+const dashboardOrigin = optional('DASHBOARD_ORIGIN', 'http://localhost:3001');
+const corsOrigins = optional('CORS_ALLOWED_ORIGINS', dashboardOrigin)
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
 
 export const config = {
   port: parseInt(optional('PORT', '3000'), 10),
@@ -47,10 +52,15 @@ export const config = {
 
   app: {
     baseUrl: optional('APP_BASE_URL', 'http://localhost:3000'),
+    dashboardOrigin,
     // In non-test environments, JWT_SECRET must be explicitly set.
     jwtSecret:
       nodeEnv === 'test'
         ? optional('JWT_SECRET', 'test-secret-not-for-production')
         : required('JWT_SECRET'),
+  },
+
+  cors: {
+    allowedOrigins: corsOrigins,
   },
 } as const;
